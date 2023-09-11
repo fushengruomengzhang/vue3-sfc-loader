@@ -117,14 +117,14 @@ export async function withCache( cacheInstance : Cache, key : any[], valueFactor
 		return await valueFactory(api);
 
 	const hashedKey = hash(...key);
-	const valueStr = await cacheInstance.get(hashedKey);
+	const valueStr = await cacheInstance.get(hashedKey, ...key);
 	if ( valueStr )
 		return JSON.parse(valueStr);
 
 	const value = await valueFactory(api);
 
 	if ( !cachePrevented ){
-		const setResult = await cacheInstance.set(hashedKey, JSON.stringify(value));
+		const setResult = await cacheInstance.set(hashedKey, JSON.stringify(value), ...key);
 		if(setResult) return setResult
 	}
 

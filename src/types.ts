@@ -18,8 +18,8 @@ export type ValueFactory = (api : ValueFactoryApi) => Promise<any>;
 
 
 export type Cache = {
-	get(key : string) : Promise<string>,
-	set(key : string, value : string) : Promise<any>,
+	get(key : string, ...keys : any[]) : Promise<string>,
+	set(key : string, value : string, ...keys : any[]) : Promise<any>,
 }
 
 
