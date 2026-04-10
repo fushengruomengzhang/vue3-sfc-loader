@@ -39,6 +39,8 @@ export type AbstractPath = {
  * Note that relPath is not necessary relative, but when it is, relPath is relative to refPath.
  */
 export type PathContext = {
+    /*load source url*/
+    refUrl? : AbstractPath,
 	/** reference path */
 	refPath : AbstractPath | undefined,
 	/** relative to @refPath */
@@ -55,6 +57,7 @@ export type PathResolve = (pathCx : PathContext, options : Options) => AbstractP
  * @param type The type of the file. It can be anything, but must be '.vue', '.js' or '.mjs' for vue, js and esm files.
  * @param getContentData The method to get the content data of a file (text or binary). see [[ File['getContentData'] ]]
  * @param path The path of the file
+ * @param url the url of the file url
  * @param options The options
  *
  *
@@ -65,7 +68,7 @@ export type PathResolve = (pathCx : PathContext, options : Options) => AbstractP
  *	...
  * ```
  */
-export type ModuleHandler = (type : string, getContentData : File['getContentData'], path : AbstractPath, options : Options) => Promise<ModuleExport | null>;
+export type ModuleHandler = (type: string, getContentData: File['getContentData'], path: AbstractPath, url: AbstractPath, options: Options) => Promise<ModuleExport | null>;
 
 
 export type ContentData = string | ArrayBuffer
@@ -79,6 +82,8 @@ export type File = {
 	getContentData : (asBinary : Boolean) => Promise<ContentData>,
 	/** The content type (file extension name, eg. '.svg' ) */
 	type : string,
+    /*load source url*/
+    url? : AbstractPath,
 }
 
 

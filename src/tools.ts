@@ -298,13 +298,13 @@ export async function loadModuleInternal(pathCx : PathContext, options : Options
 
 		if ( module === undefined ) {
 
-			const { getContentData, type } = await getContent();
+			const { getContentData, type, url } = await getContent();
 
 			if ( handleModule !== undefined )
-				module = await handleModule(type, getContentData, path, options);
+                module = await handleModule(type, getContentData, path, url, options);
 
 			if ( module === undefined )
-				module = await handleModuleInternal(type, getContentData, path, options);
+				module = await handleModuleInternal(type, getContentData, path, url, options);
 
 			if ( module === undefined )
 				throw new TypeError(`Unable to handle ${ type } files (${ path })`);
@@ -358,7 +358,7 @@ export function defaultCreateCJSModule(refPath : AbstractPath, source : string, 
 /**
  * @internal
  */
-export async function createJSModule(source : string, moduleSourceType : boolean, filename : AbstractPath, options : Options) : Promise<ModuleExport> {
+export async function createJSModule(source: string, moduleSourceType: boolean, filename: AbstractPath, url: AbstractPath, options: Options): Promise<ModuleExport> {
 
 	const { compiledCache, additionalBabelParserPlugins, additionalBabelPlugins, createCJSModule, log } = options;
 
@@ -378,7 +378,7 @@ export async function createJSModule(source : string, moduleSourceType : boolean
 		return await transformJSCode(source, moduleSourceType, filename, additionalBabelParserPlugins, additionalBabelPlugins, log, options.devMode);
 	});
 
-	await loadDeps(filename, depsList, options);
+    await loadDeps(url, filename, depsList, options);
 	return createCJSModule(filename, transformedSource, options).exports;
 }
 
@@ -387,22 +387,22 @@ export async function createJSModule(source : string, moduleSourceType : boolean
  * Just load and cache given dependencies.
  * @internal
  */
-export async function loadDeps(refPath : AbstractPath, deps : AbstractPath[], options : Options) : Promise<void> {
+export async function loadDeps(refUrl: AbstractPath, refPath: AbstractPath, deps: AbstractPath[], options: Options): Promise<void> {
 
-	await Promise.all(deps.map(relPath => loadModuleInternal({ refPath, relPath }, options)))
+    await Promise.all(deps.map(relPath => loadModuleInternal({refUrl, refPath, relPath}, options)))
 }
 
 
 /**
  * Default implementation of handleModule
  */
- async function handleModuleInternal(type : string, getContentData : File['getContentData'], path : AbstractPath, options : Options) : Promise<ModuleExport | undefined> {
+async function handleModuleInternal(type: string, getContentData: File['getContentData'], path: AbstractPath, url: AbstractPath, options: Options): Promise<ModuleExport | undefined> {
 
 	switch (type) {
 		case '.vue': return createSFCModule((await getContentData(false)) as string, path, options);
-		case '.js': return createJSModule((await getContentData(false)) as string, false, path, options);
-		case '.mjs': return createJSModule((await getContentData(false)) as string, true, path, options);
-		case '.ts': return createJSModule((await getContentData(false)) as string, true, path, {
+		case '.js': return createJSModule((await getContentData(false)) as string, false, path, url, options);
+		case '.mjs': return createJSModule((await getContentData(false)) as string, true, path, url, options);
+		case '.ts': return createJSModule((await getContentData(false)) as string, true, path, url, {
 			...options,
 			additionalBabelParserPlugins: [ 'typescript', ...(options.additionalBabelParserPlugins ?? []) ],
 			additionalBabelPlugins: { typescript: babelPlugin_typescript, ...(options.additionalBabelPlugins ?? {}) }

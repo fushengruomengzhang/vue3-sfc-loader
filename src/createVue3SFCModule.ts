@@ -191,7 +191,7 @@ export async function createSFCModule(source : string, filename : AbstractPath, 
 		if ( compileTemplateOptions?.compilerOptions !== undefined )
 			compileTemplateOptions.compilerOptions.bindingMetadata = bindingMetadata;
 
-		await loadDeps(filename, depsList, options);
+        await loadDeps(undefined, filename, depsList, options);
 		Object.assign(component, interopRequireDefault(createCJSModule(filename, transformedScriptSource, options).exports).default);
 	}
 
@@ -240,7 +240,7 @@ export async function createSFCModule(source : string, filename : AbstractPath, 
 			return await transformJSCode(template.code, true, descriptor.filename, additionalBabelParserPlugins, additionalBabelPlugins, log, devMode);
 		});
 
-		await loadDeps(filename, templateDepsList, options);
+		await loadDeps(undefined, filename, templateDepsList, options);
 		Object.assign(component, createCJSModule(filename, templateTransformedSource, options).exports);
 	}
 

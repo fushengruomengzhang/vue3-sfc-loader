@@ -90,14 +90,17 @@ const defaultPathResolve : PathResolve = ({ refPath, relPath } : PathContext, op
 function defaultGetResource(pathCx : PathContext, options : Options) : Resource {
 
 	const { pathResolve, getPathname, getFile, log } = options;
-	const path = pathResolve(pathCx, options);
-	const pathStr = path.toString();
+    const refPath = pathCx.refUrl || pathCx.refPath, relPath = pathCx.relPath;
+    const reqPath = pathResolve({refPath, relPath}, options);
+    const path = pathResolve(pathCx, options);
+    const pathStr = path.toString();
+
 	return {
 		id: pathStr,
 		path: path,
 		getContent: async () => {
 
-			const res = await getFile(path);
+			const res = await getFile(reqPath);
 
 			if ( typeof res === 'string' || res instanceof ArrayBuffer ) {
 
@@ -119,6 +122,7 @@ function defaultGetResource(pathCx : PathContext, options : Options) : Resource 
 			}			
 
 			return {
+                url: res.url,
 				type: res.type !== undefined ? res.type : Path.extname(getPathname(pathStr)),
 				getContentData: res.getContentData,
 			}
