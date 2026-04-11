@@ -26,6 +26,8 @@ import babelPlugin_typescript from '@babel/plugin-transform-typescript'
 
 import SparkMD5 from 'spark-md5'
 
+import { extname } from 'path'
+
 import {
 	Cache,
 	Options,
@@ -33,12 +35,16 @@ import {
 	ModuleExport,
 	Module,
 	LoadingType,
+	ModuleEvalSlot,
 	PathContext,
 	AbstractPath,
 	File,
 } from './types'
 
 import { createSFCModule } from './createSFCModule'
+
+/** Module ids currently between cache insert and evaluation complete (used to resolve circular static deps without deadlocking). */
+const loadingModuleIdStackByOptions = new WeakMap<Options, string[]>();
 
 
 /**
@@ -281,40 +287,91 @@ export async function loadModuleInternal(pathCx : PathContext, options : Options
 
 	if ( id in moduleCache ) {
 
-		if ( moduleCache[id] instanceof Loading )
-			return await (moduleCache[id] as Loading).promise;
-		else
-			return moduleCache[id];
+		const cached = moduleCache[id];
+		if ( cached instanceof ModuleEvalSlot ) {
+
+			const loadStack = loadingModuleIdStackByOptions.get(options) ?? [];
+			const circularWhileLoading = loadStack.includes(id);
+
+			if ( circularWhileLoading ) {
+
+				if ( cached.cjsInner !== undefined )
+					return Promise.resolve(cached.cjsInner.exports as ModuleExport);
+				if ( cached.vueShell !== undefined && cached.vueShell !== null && typeof cached.vueShell === 'object' )
+					return Promise.resolve(cached.vueShell);
+			}
+			return await cached.promise;
+		}
+		if ( cached instanceof Loading )
+			return await (cached as Loading).promise;
+		return cached as ModuleExport;
 	}
 
 
-	moduleCache[id] = new Loading((async () => {
+	const slot = new ModuleEvalSlot();
 
-		// note: null module is accepted
-		let module : ModuleExport | undefined | null = undefined;
+	// Sync require() must see this entry before any await (Node-style). Attach shells before publishing id in cache.
+	const pathStr = path.toString();
+	const ext = extname(options.getPathname(pathStr));
 
-		if ( loadModule )
-			module = await loadModule(id, options);
+	if ( ext === '.vue' ) {
 
-		if ( module === undefined ) {
+		const shell : ModuleExport = {};
+		slot.attachVueShell(shell);
+	} else if ( ext === '.js' || ext === '.mjs' || ext === '.ts' )
+		slot.attachCjs({ exports: {} as ModuleExport });
 
-			const { getContentData, type, url } = await getContent();
+	moduleCache[id] = slot;
 
-			if ( handleModule !== undefined )
-                module = await handleModule(type, getContentData, path, url, options);
+	const prevLoadStack = loadingModuleIdStackByOptions.get(options) ?? [];
+	loadingModuleIdStackByOptions.set(options, [ ...prevLoadStack, id ]);
 
-			if ( module === undefined )
-				module = await handleModuleInternal(type, getContentData, path, url, options);
 
-			if ( module === undefined )
-				throw new TypeError(`Unable to handle ${ type } files (${ path })`);
+	(async () => {
+
+		try {
+
+			// note: null module is accepted
+			let module : ModuleExport | undefined | null = undefined;
+
+			if ( loadModule )
+				module = await loadModule(id, options);
+
+			if ( module === undefined ) {
+
+				const contentFile = await getContent();
+				const { getContentData, type, url: resourceUrl } = contentFile;
+				const resolvedUrl = resourceUrl !== undefined ? resourceUrl : path;
+
+				if ( handleModule !== undefined )
+					module = await handleModule(type, getContentData, path, resolvedUrl, options);
+
+				if ( module === undefined )
+					module = await handleModuleInternal(type, getContentData, path, resolvedUrl, options, slot);
+
+				if ( module === undefined )
+					throw new TypeError(`Unable to handle ${ type } files (${ path })`);
+			}
+
+			moduleCache[id] = module as ModuleExport;
+			slot.resolveFinal(module as ModuleExport);
+
+		} catch ( ex ) {
+
+			delete moduleCache[id];
+			slot.rejectFinal(ex);
+		} finally {
+
+			const stack = loadingModuleIdStackByOptions.get(options) ?? [];
+			const ix = stack.lastIndexOf(id);
+			if ( ix >= 0 )
+				stack.splice(ix, 1);
+			loadingModuleIdStackByOptions.set(options, stack);
 		}
 
-		return moduleCache[id] = module;
+	})();
 
-	})());
-
-	return await (moduleCache[id] as LoadingType<ModuleExport>).promise;
+	return await slot.promise;
 }
 
 
@@ -324,15 +381,27 @@ export async function loadModuleInternal(pathCx : PathContext, options : Options
  * Create a cjs module
  * @internal
  */
-export function defaultCreateCJSModule(refPath : AbstractPath, source : string, options : Options) : Module {
+export function defaultCreateCJSModule(refPath : AbstractPath, source : string, options : Options, module? : Module) : Module {
 
 	const { moduleCache, pathResolve, getResource } = options;
 
 	const require = function(relPath : string) {
 
 		const { id } = getResource({ refPath, relPath }, options);
-		if ( id in moduleCache )
-			return moduleCache[id];
+		if ( id in moduleCache ) {
+
+			const entry = moduleCache[id];
+			if ( entry instanceof ModuleEvalSlot ) {
+
+				if ( entry.cjsInner !== undefined )
+					return entry.cjsInner.exports;
+				if ( entry.vueShell !== undefined && entry.vueShell !== null && typeof entry.vueShell === 'object' )
+					return entry.vueShell;
+				throw new Error(`require(${ JSON.stringify(id) }) failed: module is still loading`);
+			}
+
+			return entry as ModuleExport;
+		}
 
 		throw new Error(`require(${ JSON.stringify(id) }) failed. module not found in moduleCache`);
 	}
@@ -342,25 +411,25 @@ export function defaultCreateCJSModule(refPath : AbstractPath, source : string, 
 		return await loadModuleInternal({ refPath, relPath }, options);
 	}
 
-	const module = {
-		exports: {}
-	}
+	const moduleInstance = module ?? { exports: {} as ModuleExport };
 
 	// see https://github.com/nodejs/node/blob/a46b21f556a83e43965897088778ddc7d46019ae/lib/internal/modules/cjs/loader.js#L195-L198
 	// see https://github.com/nodejs/node/blob/a46b21f556a83e43965897088778ddc7d46019ae/lib/internal/modules/cjs/loader.js#L1102
 	const moduleFunction = Function('exports', 'require', 'module', '__filename', '__dirname', '__vsfcl_import__', source);
-	moduleFunction.call(module.exports, module.exports, require, module, refPath, pathResolve({ refPath, relPath: '.' }, options), importFunction);
+	moduleFunction.call(moduleInstance.exports, moduleInstance.exports, require, moduleInstance, refPath, pathResolve({ refPath, relPath: '.' }, options), importFunction);
 
-	return module;
+	return moduleInstance;
 }
 
 
 /**
  * @internal
  */
-export async function createJSModule(source: string, moduleSourceType: boolean, filename: AbstractPath, url: AbstractPath, options: Options): Promise<ModuleExport> {
+export async function createJSModule(source: string, moduleSourceType: boolean, filename: AbstractPath, url: AbstractPath, options: Options, moduleRef?: Module): Promise<ModuleExport> {
 
 	const { compiledCache, additionalBabelParserPlugins, additionalBabelPlugins, createCJSModule, log } = options;
+
+	const moduleObj = moduleRef ?? { exports: {} as ModuleExport };
 
 	const [depsList, transformedSource] =
 		await withCache(
@@ -378,8 +447,8 @@ export async function createJSModule(source: string, moduleSourceType: boolean, 
 		return await transformJSCode(source, moduleSourceType, filename, additionalBabelParserPlugins, additionalBabelPlugins, log, options.devMode);
 	});
 
-    await loadDeps(url, filename, depsList, options);
-	return createCJSModule(filename, transformedSource, options).exports;
+	await loadDeps(url, filename, depsList, options);
+	return createCJSModule(filename, transformedSource, options, moduleObj).exports;
 }
 
 
@@ -387,26 +456,46 @@ export async function createJSModule(source: string, moduleSourceType: boolean, 
  * Just load and cache given dependencies.
  * @internal
  */
-export async function loadDeps(refUrl: AbstractPath, refPath: AbstractPath, deps: AbstractPath[], options: Options): Promise<void> {
+export async function loadDeps(refUrl : AbstractPath | undefined, refPath : AbstractPath, deps : AbstractPath[], options : Options) : Promise<void> {
 
-    await Promise.all(deps.map(relPath => loadModuleInternal({refUrl, refPath, relPath}, options)))
+	for ( const relPath of deps )
+		await loadModuleInternal({ refUrl, refPath, relPath }, options);
 }
 
 
 /**
  * Default implementation of handleModule
  */
-async function handleModuleInternal(type: string, getContentData: File['getContentData'], path: AbstractPath, url: AbstractPath, options: Options): Promise<ModuleExport | undefined> {
+async function handleModuleInternal(type: string, getContentData: File['getContentData'], path: AbstractPath, url: AbstractPath, options: Options, slot : ModuleEvalSlot) : Promise<ModuleExport | undefined> {
 
 	switch (type) {
-		case '.vue': return createSFCModule((await getContentData(false)) as string, path, options);
-		case '.js': return createJSModule((await getContentData(false)) as string, false, path, url, options);
-		case '.mjs': return createJSModule((await getContentData(false)) as string, true, path, url, options);
-		case '.ts': return createJSModule((await getContentData(false)) as string, true, path, url, {
-			...options,
-			additionalBabelParserPlugins: [ 'typescript', ...(options.additionalBabelParserPlugins ?? []) ],
-			additionalBabelPlugins: { typescript: babelPlugin_typescript, ...(options.additionalBabelPlugins ?? {}) }
-		});
+		case '.vue': {
+
+			const shell = (slot.vueShell !== undefined && slot.vueShell !== null)
+				? slot.vueShell
+				: (() => { const sh : ModuleExport = {}; slot.attachVueShell(sh); return sh; })();
+			const source = (await getContentData(false)) as string;
+			return (createSFCModule as (src : string, fn : AbstractPath, opt : Options, init? : ModuleExport) => Promise<ModuleExport>)(source, path, options, shell);
+		}
+		case '.js': {
+
+			const m = slot.cjsInner ?? (() => { const mm : Module = { exports: {} }; slot.attachCjs(mm); return mm; })();
+			return createJSModule((await getContentData(false)) as string, false, path, url, options, m);
+		}
+		case '.mjs': {
+
+			const m = slot.cjsInner ?? (() => { const mm : Module = { exports: {} }; slot.attachCjs(mm); return mm; })();
+			return createJSModule((await getContentData(false)) as string, true, path, url, options, m);
+		}
+		case '.ts': {
+
+			const m = slot.cjsInner ?? (() => { const mm : Module = { exports: {} }; slot.attachCjs(mm); return mm; })();
+			return createJSModule((await getContentData(false)) as string, true, path, url, {
+				...options,
+				additionalBabelParserPlugins: [ 'typescript', ...(options.additionalBabelParserPlugins ?? []) ],
+				additionalBabelPlugins: { typescript: babelPlugin_typescript, ...(options.additionalBabelPlugins ?? {}) }
+			}, m);
+		}
 	}
 
 	return undefined;

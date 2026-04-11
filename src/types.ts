@@ -141,6 +141,55 @@ export type Module = {
 	promise : Promise<T>,
 }
 
+/**
+ * In-flight module cache entry: exposes partial exports (CJS) or a Vue component shell
+ * while evaluation runs, so circular dependencies match Node CJS semantics instead of deadlocking.
+ * @internal
+ */
+export class ModuleEvalSlot {
+
+	readonly promise : Promise<ModuleExport>;
+
+	private _resolve! : (value : ModuleExport) => void;
+
+	private _reject! : (reason? : unknown) => void;
+
+	/** Set before running a JS/TS module factory */
+	cjsInner? : Module;
+
+	/** Set before compiling a .vue SFC so sync require() to this id returns the in-progress component object */
+	vueShell? : ModuleExport;
+
+	constructor() {
+
+		this.promise = new Promise((resolve, reject) => {
+
+			this._resolve = resolve;
+			this._reject = reject;
+		});
+	}
+
+	attachCjs(module : Module) : void {
+
+		this.cjsInner = module;
+	}
+
+	attachVueShell(shell : ModuleExport) : void {
+
+		this.vueShell = shell;
+	}
+
+	resolveFinal(value : ModuleExport) : void {
+
+		this._resolve(value);
+	}
+
+	rejectFinal(reason? : unknown) : void {
+
+		this._reject(reason);
+	}
+}
+
 export type Options = {
 
 /**
@@ -161,7 +210,7 @@ export type Options = {
  * ```
  *
 */
-	moduleCache: Record<ModuleCacheId, LoadingType<ModuleExport> | ModuleExport>,
+	moduleCache: Record<ModuleCacheId, LoadingType<ModuleExport> | ModuleExport | ModuleEvalSlot>,
 
 
 /**
@@ -382,7 +431,7 @@ export type Options = {
  * creates a CommonJS module from JS source string.
  * *(optional)* 
  */
-	createCJSModule(refPath : AbstractPath, source : string, options : Options) : Module,
+	createCJSModule(refPath : AbstractPath, source : string, options : Options, module? : Module) : Module,
 
 
 

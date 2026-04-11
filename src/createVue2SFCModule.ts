@@ -63,11 +63,11 @@ const isProd : boolean = process.env.NODE_ENV === 'production';
  * @internal
  */
 
-export async function createSFCModule(source : string, filename : AbstractPath, options : Options) : Promise<ModuleExport> {
+export async function createSFCModule(source : string, filename : AbstractPath, options : Options, initialComponent? : ModuleExport) : Promise<ModuleExport> {
 
 	const strFilename = filename.toString();
 
-	const component = {};
+	const component = initialComponent !== undefined && initialComponent !== null ? initialComponent : {};
 
 	const {
 		delimiters,
