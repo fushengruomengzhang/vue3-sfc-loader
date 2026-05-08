@@ -61,13 +61,11 @@ const isProd : boolean = process.env.NODE_ENV === 'production';
  * @internal
  */
 
-export async function createSFCModule(source : string, filename : AbstractPath, options : Options, initialComponent? : ModuleExport) : Promise<ModuleExport> {
+export async function createSFCModule(source : string, filename : AbstractPath, options : Options) : Promise<ModuleExport> {
 
 	const strFilename = filename.toString();
 
-	const component : { [key: string]: any } = initialComponent !== undefined && initialComponent !== null
-		? initialComponent as { [key: string]: any }
-		: {};
+	const component : { [key: string]: any } = {};
 
 	const {
 		delimiters,
@@ -193,7 +191,7 @@ export async function createSFCModule(source : string, filename : AbstractPath, 
 		if ( compileTemplateOptions?.compilerOptions !== undefined )
 			compileTemplateOptions.compilerOptions.bindingMetadata = bindingMetadata;
 
-		await loadDeps(undefined, filename, depsList, options);
+        await loadDeps(undefined, filename, depsList, options);
 		Object.assign(component, interopRequireDefault(createCJSModule(filename, transformedScriptSource, options).exports).default);
 	}
 
