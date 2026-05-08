@@ -68,7 +68,7 @@ export type PathResolve = (pathCx : PathContext, options : Options) => AbstractP
  *	...
  * ```
  */
-export type ModuleHandler = (type: string, getContentData: File['getContentData'], path: AbstractPath, url: AbstractPath, options: Options) => Promise<ModuleExport | null>;
+export type ModuleHandler = (type: string, getContentData: File['getContentData'], path: AbstractPath, options: Options, url: AbstractPath) => Promise<ModuleExport | null>;
 
 
 export type ContentData = string | ArrayBuffer

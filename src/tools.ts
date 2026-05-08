@@ -301,7 +301,7 @@ export async function loadModuleInternal(pathCx : PathContext, options : Options
 			const { getContentData, type, url } = await getContent();
 
 			if ( handleModule !== undefined )
-                module = await handleModule(type, getContentData, path, url, options);
+                module = await handleModule(type, getContentData, path, options, url);
 
 			if ( module === undefined )
 				module = await handleModuleInternal(type, getContentData, path, url, options);
